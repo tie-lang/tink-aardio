@@ -1,0 +1,81 @@
+// test_tink.aardio —— tink data-flow node frame protocol tests.
+//
+// Run from the repo root with the aardio runtime (open in the aardio IDE, or
+// `aardio test_tink.aardio`); `import tink;` resolves ./lib/tink.aardio.
+// Prints PASS/FAIL lines; ending with `ALL n TESTS PASSED` on success.
+
+import console;
+import tink;
+
+// 计数器放在表对象里，避免函数闭包/作用域相关的任何歧义
+var stats = { total = 0; passed = 0; }
+
+var check = function(name, cond) {
+    stats.total = stats.total + 1
+    if( cond ) {
+        stats.passed = stats.passed + 1
+        console.log("[PASS]", name)
+    }
+    else {
+        console.log("[FAIL]", name)
+    }
+}
+
+// --- CRC32 -------------------------------------------------------------
+
+check("crc32 empty == 0", tink.crc32("") == 0)
+
+check("crc32 vector 0xCBF43926", tink.crc32("123456789") == 3453819686 /*0xCBF43926*/)
+
+// --- frame_encode ------------------------------------------------------
+
+var frame = tink.frame_encode("hi")
+
+check("encode length == payload+8", #frame == 2 + 8)
+check("encode len field big-endian",
+    ..raw.equal( ..string.slice(frame, 1, 4), ..string.pack(0, 0, 0, 2) ))
+
+// --- frame_next --------------------------------------------------------
+
+var payload, next = tink.frame_next(frame, 0)
+check("next parses payload", payload == "hi")
+check("next position == frame size", next == #frame)
+
+// CRC mismatch / truncated frame -> null
+var bad = ..string.slice(frame, 1, #frame - 1) // 尾部截断 1 字节
+check("next rejects truncated frame", tink.frame_next(bad, 0) == null)
+check("next rejects out-of-bounds pos", tink.frame_next(frame, 8) == null)
+
+// --- frame_skip --------------------------------------------------------
+
+check("skip == frame size", tink.frame_skip(frame, 0) == #frame)
+check("skip rejects truncated frame", tink.frame_skip(bad, 0) == null)
+check("skip rejects out-of-bounds pos", tink.frame_skip(frame, 8) == null)
+
+// --- binary-safe payload ----------------------------------------------
+
+var bin = ..string.pack(0, 1, 2, 255)
+var f2 = tink.frame_encode(bin)
+var p2, n2 = tink.frame_next(f2, 0)
+check("binary payload roundtrip", ..raw.equal(p2, bin))
+check("binary payload next == size", n2 == #f2)
+
+// --- multiple frames concatenated -------------------------------------
+
+var stream = frame ++ f2
+var a, na = tink.frame_next(stream, 0)
+var b, nb = tink.frame_next(stream, na)
+check("stream frame1 payload", a == "hi")
+check("stream frame2 payload", ..raw.equal(b, bin))
+check("stream ends at buffer size", nb == #stream)
+
+// --- summary -----------------------------------------------------------
+
+console.log("-----")
+if( stats.passed == stats.total ) {
+    console.log("ALL " ++ stats.total ++ " TESTS PASSED")
+}
+else {
+    console.log(stats.passed ++ " / " ++ stats.total ++ " PASSED, " ++ (stats.total - stats.passed) ++ " FAILED")
+}
+console.pause()

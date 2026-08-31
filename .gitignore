@@ -1,0 +1,8 @@
+*.exe
+*.o
+*.pyc
+__pycache__/
+.vs/
+.idea/
+debug/
+release/

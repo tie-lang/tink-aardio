@@ -1,0 +1,104 @@
+// tink.aardio —— tink data-flow node frame protocol (universal, language-agnostic).
+//
+// Frame = [len u32 BE][payload][crc u32 BE]; crc = CRC32-IEEE (0xEDB88320).
+// Mirrors std/tink.tie (tie standard library) and the other-language tink
+// libraries; pure functions over strings (byte vectors), IO (stdin/stdout)
+// left to the caller. aardio, no dependencies.
+//
+//   import tink;
+//   var frame = tink.frame_encode("hi");
+//   var payload, next = tink.frame_next(frame, 0);
+//
+// Put this file under <app>/lib/tink.aardio and `import tink;` from any
+// script in the app (aardio resolves user libraries from the app \lib dir).
+
+namespace tink {
+
+    // CRC32-IEEE over a string (byte vector; bit-loop, no table; matches
+    // zlib.crc32). Check vector: tink.crc32("123456789") == 3453819686
+    // (= 0xCBF43926). Returns an unsigned 32-bit integer.
+    crc32 = function(data) {
+        var crc = ~0;                               // 0xFFFFFFFF (32-bit 全 1)
+        var n = #data;
+        for(i=1; n; 1) {
+            crc = crc ^ data[i];                    // 字节码按位异或
+            for(j=1; 8; 1) {
+                if( (crc & 1) != 0 ) {
+                    crc = (crc >>> 1) ^ 0xEDB88320; // 无符号右移 + 多项式异或
+                }
+                else
+                {
+                    crc = crc >>> 1;
+                }
+            }
+        }
+        return (crc ^ ~0) >>> 0;                    // 取反后转无符号 32 位
+    }
+
+    // Sign-extended u32 -> 4 big-endian bytes (internal helper).
+    u32be = function(v) {
+        return ..string.pack(
+            (v >>> 24) & 0xFF,
+            (v >>> 16) & 0xFF,
+            (v >>> 8)  & 0xFF,
+            v          & 0xFF
+        );
+    }
+
+    // Read a big-endian u32 starting at 1-based string index i (internal).
+    u32be_read = function(bytes, i) {
+        var b1 = bytes[i];
+        var b2 = bytes[i + 1];
+        var b3 = bytes[i + 2];
+        var b4 = bytes[i + 3];
+        return ((b1 << 24) | (b2 << 16) | (b3 << 8) | b4) >>> 0;
+    }
+
+    // Encode a payload into a full frame: [len u32 BE][payload][crc u32 BE].
+    // Returns a string of #payload + 8 bytes.
+    frame_encode = function(payload) {
+        var n = #payload;
+        return ..string.concat(
+            self.u32be(n),
+            payload,
+            self.u32be(self.crc32(payload))
+        );
+    }
+
+    // Parse one frame at pos (0-based byte offset, verifies CRC). Returns
+    // payload,next_pos on success, or null on out-of-bounds / CRC mismatch.
+    // The returned payload is a copy.
+    frame_next = function(bytes, pos) {
+        var total = #bytes;
+        if( total < pos + 8 ) {
+            return null;
+        }
+        var n = self.u32be_read(bytes, pos + 1);    // 1-based index of len 字段
+        var end = pos + 8 + n;
+        if( total < end ) {
+            return null;
+        }
+        var payload = ..string.slice(bytes, pos + 5, pos + 4 + n);
+        var want = self.u32be_read(bytes, end - 3);
+        if( self.crc32(payload) != want ) {
+            return null;
+        }
+        return payload, end;
+    }
+
+    // Skip one frame at pos without copying or verifying (zero-copy).
+    // Returns next_pos (0-based), or null on out-of-bounds.
+    frame_skip = function(bytes, pos) {
+        var total = #bytes;
+        if( total < pos + 8 ) {
+            return null;
+        }
+        var n = self.u32be_read(bytes, pos + 1);
+        var end = pos + 8 + n;
+        if( total < end ) {
+            return null;
+        }
+        return end;
+    }
+
+}
