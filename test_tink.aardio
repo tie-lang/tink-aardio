@@ -8,7 +8,7 @@ import console;
 import tink;
 
 // 计数器放在表对象里，避免函数闭包/作用域相关的任何歧义
-var stats = { total = 0; passed = 0; }
+var stats = { total = 0; passed = 0; fails = {}; }
 
 var check = function(name, cond) {
     stats.total = stats.total + 1
@@ -17,6 +17,7 @@ var check = function(name, cond) {
         console.log("[PASS]", name)
     }
     else {
+        table.push(stats.fails, name)
         console.log("[FAIL]", name)
     }
 }
@@ -72,10 +73,19 @@ check("stream ends at buffer size", nb == #stream)
 // --- summary -----------------------------------------------------------
 
 console.log("-----")
+var summary
 if( stats.passed == stats.total ) {
-    console.log("ALL " ++ stats.total ++ " TESTS PASSED")
+    summary = "ALL " ++ stats.total ++ " TESTS PASSED"
+    console.log(summary)
 }
 else {
-    console.log(stats.passed ++ " / " ++ stats.total ++ " PASSED, " ++ (stats.total - stats.passed) ++ " FAILED")
+    summary = stats.passed ++ " / " ++ stats.total ++ " PASSED, " ++ (stats.total - stats.passed) ++ " FAILED"
+    console.log(summary)
+    console.dump(stats.fails)
 }
-console.pause()
+
+// 结果同时写入文件中，便于非交互式运行验证（aardio 控制台 stdout 无法回传）
+string.save("f:\Projects\tie-repo\tink-aardio\test_result.txt", summary)
+
+// 在 aardio IDE 内运行时暂停查看结果；命令行直接运行时自动结束
+if(_STUDIO_INVOKED) console.pause()
